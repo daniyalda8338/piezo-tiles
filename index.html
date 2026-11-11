@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fairfield Piezo Tracker</title>
+<style>
+/* ===== COLOURS: change these to restyle the whole page ===== */
+:root{--bg:#f6efdc;--card:#fffaf0;--ink:#5c4033;--gold:#c9961a;--line:#e2d4b4;--road:#a9a39a;--block:#efe3c4;--grass:#a9bf8c;--sea:#fffaf0}
+@media(prefers-color-scheme:dark){:root{--bg:#231b15;--card:#2e251d;--ink:#ecdcc6;--gold:#e0b03a;--line:#48392b;--road:#6b645b;--block:#3a2f24;--grass:#40533a;--sea:#2a2119}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+h1,h2,h3{font-family:Georgia,serif;margin:0}
+header{padding:18px 16px 4px;max-width:1280px;margin:auto}
+h1{font-size:clamp(26px,5vw,40px)}
+.tag{display:inline-block;border:1px solid var(--gold);color:var(--gold);border-radius:99px;padding:1px 10px;font-size:13px}
+.wrap{max-width:1280px;margin:auto;padding:12px 16px 40px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.big{font:700 clamp(26px,4vw,36px)/1.1 Georgia,serif;color:var(--gold)}
+.sm{font-size:13px;opacity:.8}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+select,button{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--gold);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{background:var(--gold);color:#fff}
+.layout{display:grid;gap:14px;grid-template-columns:1fr}
+@media(min-width:900px){.layout{grid-template-columns:1fr 360px}}
+svg{display:block;max-width:100%}
+#map{width:100%;height:auto;border:1px solid var(--line);border-radius:14px;background:var(--sea)}
+.road{stroke:var(--road);stroke-width:18;stroke-linecap:round;fill:none}
+.rail{stroke:var(--ink);stroke-width:3;stroke-dasharray:10 6;fill:none}
+.block{fill:var(--block)}.grass{fill:var(--grass)}
+.park{fill:var(--card);stroke:var(--ink);stroke-width:2}
+.lbl{fill:var(--ink);font:13px system-ui,sans-serif}
+.rd{fill:var(--card);font:600 13px system-ui,sans-serif}
+.bump{cursor:pointer;outline:none}
+.bump .stripe{filter:drop-shadow(0 0 0 transparent);transition:filter .2s}
+.bump:hover .stripe,.bump:focus .stripe{filter:drop-shadow(0 0 6px var(--gold))}
+.bump.sel .stripe{filter:drop-shadow(0 0 8px var(--gold));stroke:var(--gold);stroke-width:3}
+/* ===== side panel (bottom sheet on mobile) ===== */
+.panel{position:fixed;left:0;right:0;bottom:0;max-height:78vh;overflow:auto;z-index:5;background:var(--card);border-top:3px solid var(--gold);border-radius:18px 18px 0 0;padding:14px 16px;transform:translateY(105%);transition:transform .3s;box-shadow:0 -6px 24px #0004}
+.panel.open{transform:none}
+.panel .hint{display:none}
+@media(min-width:900px){
+ .panel{position:sticky;top:12px;transform:none;border:1px solid var(--line);border-radius:14px;max-height:calc(100vh - 24px);box-shadow:none}
+ .panel .hint{display:block;opacity:.8}.panel .content{display:none}.panel.open .hint{display:none}.panel.open .content{display:block}
+}
+.x{float:right;padding:2px 10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.grid2 b{display:block;font:700 24px Georgia,serif;color:var(--gold)}
+.live{border:1px dashed var(--gold);border-radius:10px;padding:8px 12px;position:relative}
+.pop{position:absolute;right:10px;top:8px;color:var(--gold);font-weight:700;opacity:0}
+.pop.go{animation:pop 1.2s ease-out}
+@keyframes pop{0%{opacity:1;transform:translateY(8px)}100%{opacity:0;transform:translateY(-14px)}}
+.batt{height:16px;border:2px solid var(--ink);border-radius:6px;overflow:hidden}
+.batt i{display:block;height:100%;background:var(--gold);transition:width .6s}
+.hon{border-left:5px solid var(--gold);margin-top:14px}
+details summary{cursor:pointer;font-weight:600}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+ <h1>Fairfield Piezo Tracker</h1>
+ <p style="margin:4px 0"><span class="tag">Simulated estimate, not live measured data</span></p>
+ <p class="sm" style="max-width:70ch">Piezoelectric tiles placed just after speed bumps near boom gates turn the push of each car into a little electricity, stored in a battery.</p>
+</header>
+
+<div class="wrap">
+ <!-- ===== DASHBOARD ===== -->
+ <div class="stats">
+  <div class="card"><div class="sm">Energy today (all bumps)</div><div class="big"><span id="dJ">0</span> J</div><div class="sm"><span id="dWh">0</span> Wh</div></div>
+  <div class="card"><div class="sm">Cars today</div><div class="big" id="dCars">0</div></div>
+  <div class="card"><div class="sm">Best speed bump</div><div class="big" style="font-size:22px" id="dBest">-</div><div class="sm" id="dBestJ"></div></div>
+  <div class="card"><div class="sm">Cost per system</div><div class="big">$3,599</div>
+   <details><summary class="sm">See breakdown</summary><div class="sm">Tiles $1,499<br>Piezo elements $500<br>Support structure $600<br>Battery $150<br>Electrical $50<br>Wiring $100<br>Installation $700</div></details></div>
+ </div>
+ <div class="bar">
+  <label>Day type <select id="dayType"><option value="weekday">Weekday</option><option value="weekend">Weekend</option></select></label>
+  <button id="reset">Reset day</button>
+  <span class="sm">Tap a yellow speed bump on the map.</span>
+ </div>
+
+ <div class="layout">
+  <!-- ===== STEP 1: THE SVG MAP ===== -->
+  <svg id="map" viewBox="0 0 1000 700" role="img" aria-label="Simplified map of Fairfield (not to scale)">
+   <rect width="1000" height="700" fill="var(--sea)"/>
+   <rect class="block" x="500" y="300" width="200" height="70" rx="12"/>
+   <rect class="block" x="770" y="170" width="150" height="70" rx="12"/>
+   <rect class="block" x="60" y="190" width="40" height="120" rx="12"/>
+   <rect class="grass" x="60" y="430" width="360" height="100" rx="16"/>
+   <rect class="grass" x="780" y="430" width="170" height="110" rx="16"/>
+   <rect class="block" x="520" y="590" width="200" height="60" rx="12"/>
+   <!-- railway just above Railway Parade -->
+   <line class="rail" x1="40" y1="126" x2="960" y2="126"/>
+   <text class="lbl" x="380" y="110">Fairfield Station</text>
+   <!-- roads (coordinates from the brief) -->
+   <path class="road" d="M40,150 L960,150"/>
+   <path class="road" d="M480,150 L480,640"/>
+   <path class="road" id="crescent" d="M120,200 Q190,350 300,420"/>
+   <path class="road" d="M40,400 L960,400"/>
+   <path class="road" d="M40,560 L960,560"/>
+   <path class="road" d="M740,150 L740,640"/>
+   <!-- street names -->
+   <text class="rd" x="80" y="155">Railway Parade</text>
+   <text class="rd" transform="rotate(-90 480 560)" x="480" y="565">Smart Street</text>
+   <text class="rd" x="640" y="405">Ware Street</text>
+   <text class="rd" x="120" y="565">Hamilton Road</text>
+   <text class="rd" transform="rotate(-90 740 480)" x="740" y="485">Court Road</text>
+   <text class="rd" transform="rotate(48 135 285)" x="135" y="285">The Crescent</text>
+   <g id="parks"></g>
+   <text class="lbl" x="500" y="684" text-anchor="middle" style="font-weight:600">Simplified map of Fairfield (not to scale)</text>
+  </svg>
+
+  <!-- ===== STEP 2: SIDE PANEL ===== -->
+  <aside class="panel" id="panel" aria-live="polite">
+   <p class="hint">Select a speed bump on the map to see its simulated numbers.</p>
+   <div class="content">
+    <button class="x" id="close" aria-label="Close panel">Close</button>
+    <h2 id="pName"></h2><div class="sm" id="pId"></div>
+    <div class="live"><div class="sm">Live counter (demo speed)</div><div class="big"><span id="pCars">0</span> cars</div><span class="pop" id="pop"></span></div>
+    <div class="grid2">
+     <div><span class="sm">Energy today</span><b><span id="pJ">0</span> J</b></div>
+     <div><span class="sm">This week</span><b><span id="pW">0</span> J</b></div>
+     <div><span class="sm">This month</span><b><span id="pM">0</span> J</b></div>
+     <div><span class="sm">Battery</span><b><span id="pB">0</span>%</b></div>
+    </div>
+    <div class="batt"><i id="pBar"></i></div>
+    <h3 style="margin-top:12px;font-size:17px">Energy by hour (J)</h3>
+    <svg id="chart" viewBox="0 0 480 150" width="100%"></svg>
+    <h3 style="margin-top:12px;font-size:17px">What could this power?</h3>
+    <p class="sm" id="pLed"></p>
+    <p class="sm">A boom gate motor needs far more power than this, often 100 W or more while it moves.</p>
+   </div>
+  </aside>
+ </div>
+
+ <!-- ===== HONESTY PANEL ===== -->
+ <div class="card hon">
+  <h3>Honest notes</h3>
+  <p><b>Everything here is a simulated estimate, not live measured data.</b> Each car is assumed to make 0.1 to 1 joule. The map is simplified and positions are approximate.</p>
+  <p>This system cannot fully power a boom gate. It can help power LED lights, sensors and monitoring equipment.</p>
+ </div>
+</div>
+
+<script>
+/* =========================================================
+   1. SETTINGS YOU CAN EDIT
+   ========================================================= */
+const MIN_JOULES = 0.1;   // least energy one car can make (J)
+const MAX_JOULES = 1;     // most energy one car can make (J)
+const BATTERY_J  = 400;   // pretend battery size for the demo (J)
+const VEHICLES = [        // type, share of traffic, energy multiplier
+  {name:"car",   share:0.70, mult:1.0},
+  {name:"SUV",   share:0.20, mult:1.2},
+  {name:"ute/truck", share:0.10, mult:1.4}
+];
+
+/* =========================================================
+   2. CAR PARKS AND SPEED BUMPS (edit x,y here!)
+   x,y = centre of the car park on the 1000x700 map.
+   Each bump: dx,dy = offset from the car park centre,
+   daily = typical cars per weekday.
+   ========================================================= */
+const CAR_PARKS = [
+  {name:"Fairfield Station car park",       x:330, y:200, bumps:[{label:"Bump A", dx:-10, dy:14, daily:230}]},
+  {name:"Fairfield Forum car park",         x:590, y:240, bumps:[{label:"Bump A", dx:-10, dy:4, daily:260},{label:"Bump B", dx:-10, dy:24, daily:210}]},
+  {name:"The Crescent multi-deck car park", x:230, y:300, bumps:[{label:"Bump A", dx:-10, dy:14, daily:180}]},
+  {name:"Smart Street car park",            x:560, y:470, bumps:[{label:"Bump A", dx:-10, dy:4, daily:200},{label:"Bump B", dx:-10, dy:24, daily:170}]},
+  {name:"Court Road car park",              x:840, y:300, bumps:[{label:"Bump A", dx:-10, dy:14, daily:150}]}
+];
+
+/* Share of a day's traffic in each hour (0-23). Busy 7-9, lunch, 3-6pm, quiet at night. */
+const WEEKDAY=[1,1,1,1,2,3,6,12,12,7,5,6,9,8,6,8,11,11,10,6,4,3,2,1];
+const WEEKEND=[1,1,1,1,1,2,3,5,7,9,10,11,11,10,9,8,7,6,5,4,3,2,2,1];
+
+/* =========================================================
+   3. SEEDED RANDOM (same numbers every reload)
+   ========================================================= */
+function hashStr(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
+function seeded(seed){let a=seed;return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+/* Energy of ONE car, using any random function. Capped at MAX_JOULES. */
+function oneCar(rnd){
+  let r=rnd(),m=1,type="car",acc=0;
+  for(const v of VEHICLES){acc+=v.share;if(r<=acc){m=v.mult;type=v.name;break}}
+  return {j:Math.min(MAX_JOULES,(MIN_JOULES+rnd()*(MAX_JOULES-MIN_JOULES))*m),type};
+}
+
+/* All the cars in one hour (always identical for the same bump/hour/day type). */
+function genHour(b,h,type){
+  const w=type==="weekday"?WEEKDAY:WEEKEND, tot=w.reduce((a,c)=>a+c,0);
+  const rnd=seeded(hashStr(b.id+type+h));
+  const n=Math.round(b.daily*(type==="weekend"?0.8:1)*w[h]/tot*(0.85+0.3*rnd()));
+  return Array.from({length:n},()=>oneCar(rnd).j);
+}
+const sum=a=>a.reduce((x,y)=>x+y,0);
+
+/* =========================================================
+   4. BUILD THE BUMP LIST AND THE STATE
+   ========================================================= */
+const BUMPS=[];
+CAR_PARKS.forEach(p=>p.bumps.forEach(b=>{
+  b.id=p.name+" "+b.label; b.park=p.name; b.px=p.x+b.dx; b.py=p.y+b.dy; BUMPS.push(b);
+}));
+let dayType="weekday", cars={}, joules={}, selected=null, rndLive=Math.random;
+
+/* Start the day: full hours before now, part of this hour, nothing later. */
+function buildDay(){
+  const now=new Date(), nh=now.getHours(), frac=now.getMinutes()/60;
+  BUMPS.forEach(b=>{
+    cars[b.id]=Array(24).fill(0); joules[b.id]=Array(24).fill(0);
+    for(let h=0;h<=nh;h++){
+      let list=genHour(b,h,dayType);
+      if(h===nh) list=list.slice(0,Math.floor(list.length*frac));
+      cars[b.id][h]=list.length; joules[b.id][h]=sum(list);
+    }
+  });
+}
+const totalJ=id=>sum(joules[id]), totalCars=id=>sum(cars[id]);
+/* Week and month are estimates from full-day seeded totals. */
+function fullDay(b,type){let t=0;for(let h=0;h<24;h++)t+=sum(genHour(b,h,type));return t}
+function weekJ(b){return fullDay(b,"weekday")*5+fullDay(b,"weekend")*2}
+
+/* =========================================================
+   5. DRAW THE CAR PARKS AND BUMPS ON THE MAP
+   ========================================================= */
+const NS="http://www.w3.org/2000/svg", parksG=document.getElementById("parks");
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e}
+CAR_PARKS.forEach(p=>{
+  const g=el("g",{},parksG);
+  el("rect",{class:"park",x:p.x-55,y:p.y-35,width:110,height:70,rx:12},g);
+  el("circle",{cx:p.x-38,cy:p.y-19,r:9,fill:"#2f6fb0"},g);
+  const P=el("text",{x:p.x-38,y:p.y-14.5,"text-anchor":"middle",fill:"#fff","font-size":13,"font-weight":700},g);P.textContent="P";
+  const t=el("text",{class:"lbl",x:p.x,y:p.y+51,"text-anchor":"middle","font-size":12},g);t.textContent=p.name;
+  p.bumps.forEach(b=>{
+    // boom gate icon: post + arm
+    el("rect",{x:b.px+24,y:b.py-5,width:5,height:10,fill:"#8a2b2b"},g);
+    el("line",{x1:b.px+29,y1:b.py,x2:b.px+50,y2:b.py,stroke:"#8a2b2b","stroke-width":3,"stroke-dasharray":"4 3"},g);
+    // clickable speed bump
+    const s=el("g",{class:"bump",tabindex:0,role:"button","aria-label":b.id},g);
+    el("rect",{x:b.px-26,y:b.py-14,width:52,height:28,fill:"transparent"},s); // bigger click target
+    el("rect",{class:"stripe",x:b.px-18,y:b.py-7,width:36,height:14,rx:5,fill:"#f2c200",stroke:"#222","stroke-width":1.5},s);
+    for(let i=-12;i<=12;i+=8)el("line",{x1:b.px+i,y1:b.py-7,x2:b.px+i+4,y2:b.py+7,stroke:"#222","stroke-width":3},s);
+    el("path",{d:`M${b.px+1},${b.py-6} l-4,7 h3 l-1,5 l5,-8 h-3z`,fill:"#fff",stroke:"#222","stroke-width":.6},s);
+    b.node=s;
+    s.addEventListener("click",e=>{e.stopPropagation();openPanel(b)});
+    s.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openPanel(b)}});
+  });
+});
+// click on empty map = close panel
+document.getElementById("map").addEventListener("click",closePanel);
+document.getElementById("close").addEventListener("click",closePanel);
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closePanel()});
+
+/* =========================================================
+   6. PANEL AND NUMBER ANIMATION
+   ========================================================= */
+const $=id=>document.getElementById(id), panel=$("panel");
+const calm=matchMedia("(prefers-reduced-motion: reduce)").matches;
+function num(id,to,d){ // smoothly count to a new number
+  const e=$(id), from=+e.dataset.v||0; e.dataset.v=to;
+  if(calm||from===to){e.textContent=to.toFixed(d);return}
+  const t0=performance.now();
+  (function f(t){const k=Math.min(1,(t-t0)/600);e.textContent=(from+(to-from)*k).toFixed(d);if(k<1)requestAnimationFrame(f)})(t0);
+}
+function openPanel(b){
+  BUMPS.forEach(x=>x.node.classList.remove("sel"));
+  selected=b; b.node.classList.add("sel"); panel.classList.add("open");
+  $("pName").textContent=b.park+" – "+b.label; $("pId").textContent="Speed bump ID: "+b.id+" (simulated)";
+  ["pCars","pJ","pW","pM","pB"].forEach(i=>$(i).dataset.v=0);
+  renderPanel();
+}
+function closePanel(){selected=null;panel.classList.remove("open");BUMPS.forEach(x=>x.node.classList.remove("sel"))}
+function renderPanel(){
+  if(!selected)return; const b=selected, j=totalJ(b.id);
+  num("pCars",totalCars(b.id),0); num("pJ",j,1);
+  num("pW",weekJ(b),0); num("pM",weekJ(b)*30/7,0);
+  const bat=Math.min(100,30+j/BATTERY_J*100); num("pB",bat,0); $("pBar").style.width=bat+"%";
+  $("pLed").textContent=`Today's ${j.toFixed(1)} J would run a 1 W LED for about ${Math.round(j)} seconds.`;
+  // hourly bar chart (plain SVG)
+  const now=new Date().getHours(), arr=joules[b.id], mx=Math.max(1,...arr);
+  let s="";
+  arr.forEach((v,h)=>{const bh=v/mx*110;
+    s+=`<rect x="${h*20+3}" y="${120-bh}" width="14" height="${bh}" rx="2" fill="${h===now?"var(--gold)":"var(--ink)"}" opacity="${h>now?.2:.75}"><title>${h}:00 – ${v.toFixed(1)} J</title></rect>`;
+    if(h%6===0)s+=`<text x="${h*20+3}" y="140" font-size="11" fill="var(--ink)">${h}h</text>`});
+  $("chart").innerHTML=s;
+}
+
+/* =========================================================
+   7. DASHBOARD
+   ========================================================= */
+function renderDash(){
+  let J=0,C=0,best=null;
+  BUMPS.forEach(b=>{const j=totalJ(b.id);J+=j;C+=totalCars(b.id);if(!best||j>totalJ(best.id))best=b});
+  num("dJ",J,1); num("dWh",J/3600,3); num("dCars",C,0);
+  $("dBest").textContent=best.id; $("dBestJ").textContent=totalJ(best.id).toFixed(1)+" J today";
+}
+
+/* =========================================================
+   8. LIVE SIMULATION: a car passes a bump every 2-3 seconds
+   ========================================================= */
+function tick(){
+  const h=new Date().getHours(); let shown=null;
+  BUMPS.forEach(b=>{
+    if(rndLive()<0.6){ // not every bump sees a car each tick
+      const c=oneCar(rndLive); cars[b.id][h]++; joules[b.id][h]+=c.j;
+      if(b===selected)shown=c;
+    }
+  });
+  if(shown){const p=$("pop");p.textContent=`+${shown.j.toFixed(2)} J (${shown.type})`;p.classList.remove("go");void p.offsetWidth;p.classList.add("go")}
+  renderPanel(); renderDash();
+  setTimeout(tick,2000+Math.random()*1000);
+}
+
+/* Controls */
+$("dayType").addEventListener("change",e=>{dayType=e.target.value;resetAll()});
+$("reset").addEventListener("click",resetAll);
+function resetAll(){buildDay();renderDash();renderPanel()}
+
+resetAll(); setTimeout(tick,2500);
+</script>
+</body>
+</html>
